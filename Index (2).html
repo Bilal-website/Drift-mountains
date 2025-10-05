@@ -1,0 +1,295 @@
+<!doctype html>
+
+<html lang="en">  
+<head>  
+  <meta charset="utf-8" />  
+  <meta name="viewport" content="width=device-width,initial-scale=1" />  
+  <title>Drift Mountains — Open World Demo</title>  
+  <style>  
+    :root{--bg:#08101a;--hud:#e6e9ef}  
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial}  
+    body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#071022 0%, #091827 100%);color:var(--hud)}  
+    .wrap{width:1100px;max-width:98vw;padding:18px;box-sizing:border-box}  
+    h1{margin:0 0 8px;font-size:20px}  
+    #gameCanvas{display:block;background:#081018;width:100%;height:auto;border-radius:12px;box-shadow:0 8px 30px rgba(2,6,23,.6)}  
+    .controls{display:flex;gap:12px;margin-top:12px;align-items:center}  
+    .btn{background:#111827;border:1px solid rgba(255,255,255,.04);padding:8px 12px;border-radius:8px;color:var(--hud);cursor:pointer}  
+    .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:12px;border-radius:10px}  
+    .car-select{display:flex;gap:8px}  
+    .car-card{padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);cursor:pointer;min-width:160px}  
+    .car-card.active{outline:2px solid rgba(255,200,50,0.12)}  
+    .footer{margin-top:10px;font-size:12px;color:rgba(230,233,239,.7)}  
+    .tune{display:flex;gap:8px;margin-top:8px}  
+    .tune input{width:120px}  
+    @media (max-width:720px){.wrap{padding:8px}}  
+  </style>  
+</head>  
+<body>  
+  <div class="wrap">  
+    <h1>Drift Mountains — Open World Demo (single file)</h1>  <div class="panel">  
+  <div style="display:flex;justify-content:space-between;align-items:center">  
+    <div>  
+      <strong>Select Car / Tune</strong>  
+      <div class="car-select" style="margin-top:8px">  
+        <div class="car-card" id="car_bmw" data-car="bmw"><strong>BMW M Drift</strong><div style="font-size:12px">Balanced, tunable</div></div>  
+        <div class="car-card" id="car_lambo" data-car="lambo"><strong>Lamborghini GT</strong><div style="font-size:12px">Fast, twitchy</div></div>  
+        <div class="car-card" id="car_bugatti" data-car="bugatti"><strong>Bugatti Hyper</strong><div style="font-size:12px">Top speed, heavy</div></div>  
+      </div>  
+      <div class="tune">  
+        <label style="font-size:13px">Grip <input id="t_grip" type="range" min="0.5" max="1" step="0.01"></label>  
+        <label style="font-size:13px">Power <input id="t_power" type="range" min="150" max="1200" step="10"></label>  
+      </div>  
+    </div>  
+    <div>  
+      <button id="startBtn" class="btn">Start World</button>  
+      <button id="teleportBtn" class="btn">Teleport Home</button>  
+    </div>  
+  </div>  
+
+  <div style="display:flex;gap:12px;margin-top:12px;align-items:center">  
+    <div class="info">Use A/D or ←/→ to steer. W/S or ↑/↓ to throttle/brake. Space = handbrake (drift). C = change camera. Click a car to select, adjust grip/power then drive.</div>  
+  </div>  
+</div>  
+
+<canvas id="gameCanvas" width="1100" height="650"></canvas>  
+<div class="footer">Open-world style demo with 5000×3000 world, camera follow, drifting, car selection and simple upgrades. Ask me to add AI traffic, save/load, multiplayer or mobile packaging.</div>
+
+  </div>    <script>  
+  // Open-world simplified drift demo  
+  const canvas = document.getElementById('gameCanvas');  
+  const ctx = canvas.getContext('2d');  
+  const W = canvas.width, H = canvas.height;  
+  
+  // World  
+  const WORLD = { w: 5000, h: 3000 };  
+  
+  // Cars  
+  const CAR_PRESETS = {  
+    bmw: {name:'BMW M Drift', color:'#2b6cb0', mass:1200, power:380, grip:0.85, driftFactor:0.96},  
+    lambo: {name:'Lamborghini GT', color:'#f59e0b', mass:1400, power:520, grip:0.78, driftFactor:0.92},  
+    bugatti: {name:'Bugatti Hyper', color:'#ef476f', mass:1900, power:900, grip:0.9, driftFactor:0.98}  
+  };  
+  let selectedCarKey = 'bmw';  
+  
+  // Player (in world coordinates)  
+  const player = {  
+    x: WORLD.w/2,  
+    y: WORLD.h/2,  
+    angle: 0, // radians - heading  
+    speed: 0,  
+    vx:0, vy:0,  
+    sliding:0,  
+    handbrake:false  
+  };  
+  
+  // Camera  
+  const cam = { x: 0, y: 0, shake:0, mode:0 };  
+  
+  // Some world objects: simple mountain roads drawn as curves and a few POIs  
+  const roads = [];  
+  const POIS = [];  
+  
+  // Input  
+  const keys = {};  
+  window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()]=true; if([' ','c'].includes(e.key.toLowerCase())) e.preventDefault(); });  
+  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });  
+  
+  // UI hooks  
+  document.getElementById('startBtn').addEventListener('click', ()=>{ if(!running) start(); });  
+  document.getElementById('teleportBtn').addEventListener('click', ()=>{ player.x=WORLD.w/2; player.y=WORLD.h/2; player.speed=0; });  
+  document.getElementById('car_bmw').addEventListener('click', ()=>selectCar('bmw'));  
+  document.getElementById('car_lambo').addEventListener('click', ()=>selectCar('lambo'));  
+  document.getElementById('car_bugatti').addEventListener('click', ()=>selectCar('bugatti'));  
+  
+  // tune sliders  
+  const tGrip = document.getElementById('t_grip');  
+  const tPower = document.getElementById('t_power');  
+  tGrip.addEventListener('input', applyTuning);  
+  tPower.addEventListener('input', applyTuning);  
+  
+  function selectCar(k){ selectedCarKey = k; document.querySelectorAll('.car-card').forEach(c=>c.classList.remove('active')); document.getElementById('car_'+k).classList.add('active'); // apply tuning values to UI  
+    const c = CAR_PRESETS[k]; tGrip.value = c.grip; tPower.value = c.power; }  
+  selectCar('bmw');  
+  
+  function applyTuning(){ const c = CAR_PRESETS[selectedCarKey]; c.grip = parseFloat(tGrip.value); c.power = parseFloat(tPower.value); }  
+  
+  // generate a winding mountain road (simple polyline)  
+  function generateWorld(){  
+    // create a serpentine road across the world  
+    const segs = 200;  
+    for(let i=0;i<segs;i++){  
+      const t = i/(segs-1);  
+      const nx = WORLD.w*0.1 + t*(WORLD.w*0.8) + Math.sin(i*0.6)*200;  
+      const ny = WORLD.h*0.2 + Math.cos(i*0.4)*500 + t*WORLD.h*0.6;  
+      roads.push({x:nx,y:ny});  
+      if(i%20===0) POIS.push({x:nx + Math.random()*200 -100, y:ny + Math.random()*200 -100, label: 'POI '+i});  
+    }  
+  }  
+  generateWorld();  
+  
+  // Simple helper: world->screen transform  
+  function worldToScreen(wx,wy){ return { x: (wx - cam.x) + W/2, y: (wy - cam.y) + H/2 }; }  
+  
+  // Running state  
+  let running = false;  
+  let last = performance.now();  
+  
+  function start(){ running=true; last = performance.now(); requestAnimationFrame(loop); }  
+  
+  // Physics update (very simplified drifting)  
+  function update(dt){  
+    const car = CAR_PRESETS[selectedCarKey];  
+    const left = keys['arrowleft']||keys['a']||false;  
+    const right = keys['arrowright']||keys['d']||false;  
+    const up = keys['arrowup']||keys['w']||false;  
+    const down = keys['arrowdown']||keys['s']||false;  
+    const hand = keys[' ']||false;  
+    const camToggle = keys['c']||false;  
+  
+    // engine model  
+    const throttle = up ? 1 : 0;  
+    const brake = down ? 1 : 0;  
+    player.handbrake = hand;  
+    const maxAccel = car.power / car.mass * 1200; // scaled  
+    const accel = (throttle - brake*1.2) * maxAccel;  
+    // speed update  
+    player.speed += accel * dt;  
+    // drag  
+    const drag = 0.0008 * player.speed * player.speed;  
+    player.speed -= drag * dt * 60;  
+    player.speed = Math.max(-20, Math.min(420, player.speed));  
+  
+    // steering  
+    const steerInput = (left? -1:0) + (right?1:0);  
+    const steerRate = 0.003 + 0.00002 * Math.abs(player.speed);  
+    // when sliding, steering is amplified  
+    const slidingFactor = 1 + player.sliding*1.8;  
+    player.angle += steerInput * steerRate * slidingFactor * dt * 60;  
+  
+    // Drift behaviour: handbrake reduces grip -> sliding increases  
+    if(player.handbrake && Math.abs(player.speed) > 20){ player.sliding = Math.min(1, player.sliding + 0.06); } else { player.sliding = Math.max(0, player.sliding - 0.03); }  
+  
+    // compute velocity vector using heading; sliding causes lateral component  
+    const forwardVel = Math.cos(player.sliding*0.5) * player.speed;  
+    const lateral = Math.sin(player.sliding*0.9) * player.speed * 0.4;  
+    player.vx = Math.cos(player.angle) * forwardVel - Math.sin(player.angle) * lateral;  
+    player.vy = Math.sin(player.angle) * forwardVel + Math.cos(player.angle) * lateral;  
+  
+    // update position  
+    player.x += player.vx * dt * 60;  
+    player.y += player.vy * dt * 60;  
+  
+    // world bounds clamp  
+    player.x = Math.max(50, Math.min(WORLD.w-50, player.x));  
+    player.y = Math.max(50, Math.min(WORLD.h-50, player.y));  
+  
+    // camera follows with smoothing  
+    const targetX = player.x;  
+    const targetY = player.y - 120; // offset forward  
+    cam.x += (targetX - cam.x) * Math.min(1, 4*dt);  
+    cam.y += (targetY - cam.y) * Math.min(1, 4*dt);  
+  
+    // small camera shake when sliding  
+    cam.shake = cam.shake * 0.92 + (player.sliding * 6);  
+    if(cam.shake > 0.5){ cam.x += (Math.random()-0.5)*cam.shake; cam.y += (Math.random()-0.5)*cam.shake; }  
+  }  
+  
+  // draw functions  
+  function drawWorld(){  
+    // sky  
+    const g = ctx.createLinearGradient(0,0,0,H);  
+    g.addColorStop(0,'#0b1722'); g.addColorStop(1,'#071018');  
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);  
+  
+    // far mountains (repeat tiling based on cam.x)  
+    for(let i=0;i<6;i++){  
+      const ox = (i-3)*800 + ((cam.x*0.02)%800);  
+      const baseY = H*0.28;  
+      ctx.beginPath(); ctx.moveTo(0, H);  
+      for(let x=0;x<=W;x+=10){ const h = Math.abs(Math.sin((x+ox)/120))*120 + 60; ctx.lineTo(x, baseY - h); }  
+      ctx.lineTo(W,H); ctx.closePath(); ctx.fillStyle = 'rgba(10,14,20,0.12)'; ctx.fill();  
+    }  
+  
+    // ground (grass)  
+    ctx.fillStyle = '#072018'; ctx.fillRect(0,H*0.55,W,H*0.45);  
+  
+    // draw road polyline in screen space  
+    ctx.lineWidth = 18; ctx.lineCap='round';  
+    ctx.strokeStyle = '#2b2f36'; ctx.beginPath();  
+    for(let i=0;i<roads.length;i++){  
+      const s = worldToScreen(roads[i].x, roads[i].y);  
+      if(i===0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);  
+    }  
+    ctx.stroke();  
+  
+    // inner lane marker  
+    ctx.lineWidth = 4; ctx.setLineDash([30,18]); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.beginPath();  
+    for(let i=0;i<roads.length;i++){ const s=worldToScreen(roads[i].x, roads[i].y); if(i===0) ctx.moveTo(s.x,s.y); else ctx.lineTo(s.x,s.y); }  
+    ctx.stroke(); ctx.setLineDash([]);  
+  
+    // POIs  
+    for(const p of POIS){ const s = worldToScreen(p.x,p.y); ctx.fillStyle='rgba(255,200,80,0.9)'; ctx.beginPath(); ctx.arc(s.x,s.y,8,0,Math.PI*2); ctx.fill(); ctx.font='12px sans-serif'; ctx.fillText(p.label, s.x+12, s.y+4); }  
+  
+    // boundaries / rocks  
+    for(let i=0;i<80;i++){  
+      const rx = (i*1993)%WORLD.w; const ry = (i*1319)%WORLD.h;  
+      const s = worldToScreen(rx,ry);  
+      const r = 8 + ((rx+ry)%6);  
+      ctx.fillStyle = 'rgba(40,40,40,0.9)'; ctx.beginPath(); ctx.arc(s.x, s.y, r,0,Math.PI*2); ctx.fill();  
+    }  
+  }  
+  
+  function drawCarScreen(x,y,w,h,color,angle,sliding){  
+    ctx.save(); ctx.translate(x,y); ctx.rotate(angle);  
+    ctx.fillStyle = color; roundRect(ctx,-w/2,-h/2,w,h,8,true,false);  
+    ctx.fillStyle='rgba(0,0,0,0.28)'; ctx.fillRect(-w*0.18,-h*0.3,w*0.36,h*0.22);  
+    // wheels  
+    ctx.fillStyle='#0c0c0c'; ctx.fillRect(-w/2-6,-h/2+8,12,6); ctx.fillRect(w/2-6,-h/2+8,12,6); ctx.fillRect(-w/2-6,h/2-14,12,6); ctx.fillRect(w/2-6,h/2-14,12,6);  
+    // smoke  
+    if(sliding>0.15){ ctx.globalAlpha = Math.min(0.7, sliding*0.6); for(let i=0;i<4;i++){ ctx.fillStyle='rgba(90,90,90,0.08)'; ctx.beginPath(); ctx.arc(-w/2 + i*10, h/2 + 10 + i*3, 6 + i*1.5,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; }  
+    ctx.restore();  
+  }  
+  
+  function drawHUD(){  
+    const car = CAR_PRESETS[selectedCarKey];  
+    ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.font='16px sans-serif'; ctx.textAlign='left';  
+    ctx.fillText(car.name, 18, 28);  
+    ctx.fillText('Speed: '+Math.round(player.speed)+' km/h', 18, 54);  
+    ctx.fillText('Grip: '+Math.round(car.grip*100)+'%', 18, 78);  
+    ctx.fillText('Slide: '+Math.round(player.sliding*100)+'%', 18, 102);  
+  
+    // minimap (very simple)  
+    const size = 160; const mx = W - size - 18; const my = 18;  
+    ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.fillRect(mx,my,size,size);  
+    // draw roads simplified  
+    ctx.save(); ctx.beginPath(); ctx.clip(); ctx.translate(mx,my);  
+    const scaleX = size / WORLD.w; const scaleY = size / WORLD.h;  
+    ctx.fillStyle='rgba(255,255,255,0.06)'; for(const r of roads){ ctx.fillRect(r.x*scaleX, r.y*scaleY, 2,2); }  
+    // player dot  
+    ctx.fillStyle='rgba(255,80,80,0.95)'; ctx.beginPath(); ctx.arc(player.x*scaleX, player.y*scaleY,4,0,Math.PI*2); ctx.fill();  
+    ctx.restore();  
+  }  
+  
+  function draw(){  
+    ctx.clearRect(0,0,W,H);  
+    drawWorld();  
+    // draw player at screen center  
+    const s = worldToScreen(player.x, player.y);  
+    drawCarScreen(s.x, s.y, 64, 120, CAR_PRESETS[selectedCarKey].color, player.angle, player.sliding);  
+    drawHUD();  
+  }  
+  
+  // util rounded rect  
+  function roundRect(ctx, x, y, w, h, r, fill, stroke){ if (typeof r === 'undefined') r = 5; if (typeof stroke === 'undefined') stroke = true; if (typeof fill === 'undefined') fill = true; ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); if (fill) ctx.fill(); if (stroke) ctx.stroke(); }  
+  
+  // main loop  
+  function loop(now){ const dt = Math.min(1/30, (now - last)/1000); last = now; if(running) update(dt); draw(); requestAnimationFrame(loop); }  
+  
+  // initial draw  
+  draw();  
+  canvas.addEventListener('pointerdown', ()=>{ if(!running) start(); }, { once:true });  
+  
+  // expose debug  
+  window.DEBUG = {WORLD, player, CAR_PRESETS, roads};  
+  </script>  </body>  
+</html>  
